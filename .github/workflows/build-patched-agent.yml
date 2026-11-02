@@ -1,0 +1,39 @@
+name: Build patched agent
+on:
+  push:
+    branches: [fix-additive-installation-id]
+    paths: [".github/workflows/build-patched-agent.yml", "agent/**"]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24.x"
+          cache-dependency-path: agent/go.sum
+      - name: Build agent (linux/amd64)
+        working-directory: agent
+        env:
+          CGO_ENABLED: "0"
+          GOOS: linux
+          GOARCH: amd64
+        run: |
+          VERSION="$(sed -nE "s/.*AGENT_VERSION[[:space:]]*=[[:space:]]*['\"]([^'\"]+)['\"].*/\1/p" ../shared/versions.ts | head -n1)"
+          VERSION="${VERSION#v}"
+          echo "building version $VERSION"
+          mkdir -p ../dist
+          go build -trimpath -ldflags "-s -w -X main.Version=$VERSION" -o ../dist/forwardx-agent-linux-amd64 .
+      - name: Tests for FXP additive sync
+        working-directory: agent
+        continue-on-error: true
+        run: go test -count=1 -run 'FXP|Fxp|Additive' ./...
+      - name: Checksum
+        run: cd dist && sha256sum forwardx-agent-linux-amd64 | tee SHA256SUMS && file forwardx-agent-linux-amd64
+      - uses: actions/upload-artifact@v4
+        with:
+          name: forwardx-agent-linux-amd64-patched
+          path: dist/
